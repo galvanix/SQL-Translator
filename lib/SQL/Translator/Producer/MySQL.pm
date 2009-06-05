@@ -298,7 +298,7 @@ sub produce {
                                          });
     }
 
-    if ($mysql_version >= 5.000001) {
+    if (!$mysql_version || $mysql_version >= 5.000001) {
       for my $view ( $schema->get_views ) {
         push @table_defs, create_view($view,
                                        { add_replace_view  => $add_drop_table,
