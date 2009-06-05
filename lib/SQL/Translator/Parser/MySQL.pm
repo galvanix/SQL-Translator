@@ -909,7 +909,7 @@ sub parse {
     my @views = sort { 
         $result->{views}->{ $a }->{'order'} <=> $result->{views}->{ $b }->{'order'}
     } keys %{ $result->{views} };
-    foreach my $view_name (keys %{ $result->{views} }) {
+    foreach my $view_name (@views) {
         $schema->add_view(
             name => $view_name,
             sql  => $result->{views}->{$view_name}->{sql},
