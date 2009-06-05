@@ -224,7 +224,7 @@ string :
    /"(\\.|""|[^\\\"])*"/
   # For reference, std sql str: /(?:(?:\')(?:[^\']*(?:(?:\'\')[^\']*)*)(?:\'))//
 
-nonstring : /[^;\'"]+/
+nonstring : /[^\Q$delimiter\E\'"]+/
 
 statement_body : (string | nonstring)(s?)
 
