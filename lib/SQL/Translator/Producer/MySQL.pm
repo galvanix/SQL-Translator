@@ -534,7 +534,7 @@ sub create_field
     my $charset = $extra{'mysql_charset'};
     my $collate = $extra{'mysql_collate'};
 
-    my $mysql_version = $options->{mysql_version} || 0;
+    my $mysql_version = parse_mysql_version ($options->{mysql_version}, 'perl') || 0;
     #
     # Oracle "number" type -- figure best MySQL type
     #
