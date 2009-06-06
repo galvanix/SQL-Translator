@@ -312,7 +312,7 @@ sub produce {
       }
     }
 
-    if ($mysql_version >= 5.000002) {
+    if (!$mysql_version || $mysql_version >= 5.000002) {
         for my $trigger ( $schema->get_triggers ) {
             push @table_defs, create_trigger($trigger, {
                 add_drop_trigger  => $add_drop_table,
@@ -322,7 +322,7 @@ sub produce {
             });
         }
     } else {
-        warn "triggers not supported in mysql version '@{[$producer_args->{mysql_version} || 'unknown']}'";
+        warn "triggers not supported in mysql version '$mysql_version'";
     }
 
 #    print "@table_defs\n";
@@ -339,9 +339,10 @@ sub create_trigger {
     my $trigger_name = $trigger->name;
     debug("PKG: Looking at trigger '${trigger_name}'\n");
 
-    my $create = '';
-    $create .= "--\n-- Trigger: ${qt}${trigger_name}${qt}\n--\n" unless $options->{no_comments};
+    my @create;
     for my $event (@{$trigger->database_events}) {
+        push @create, "DROP TRIGGER IF EXISTS $trigger_name" if $options->{add_drop_trigger};
+        my $create = "";
         $create .= "CREATE";
         $create .= " DEFINER = " . $trigger->{mysql_definer} if $trigger->{mysql_definer};
         $create .= " TRIGGER ${qt}${trigger_name}".(@{$trigger->database_events} > 1 ? "_$event" : "")."${qt}";
@@ -354,9 +355,15 @@ sub create_trigger {
                           :die "trigger ->{database_events} must be 'insert', 'update' or 'delete'");
         $create .= " ON ${qt}".$trigger->on_table."${qt} FOR EACH ROW ";
         $create .= $trigger->action;
-        $create .= ";\n\n";
+        push @create, $create;
     }
-        return $create;
+    my $create = '';
+    $create .= "--\n-- Trigger: ${qt}${trigger_name}${qt}\n--\n" unless $options->{no_comments};
+    if ($trigger->action =~ /^\s*BEGIN/) {
+        $create .= "DELIMITER |\n" . join('',map {"$_|\n"} @create) . "DELIMITER "; # semicolon will be added in &produce
+    } else {
+        $create .= join(";\n", @create);
+    }
 }
 
 sub create_view {

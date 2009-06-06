@@ -174,7 +174,7 @@ use constant DEFAULT_PARSER_VERSION => 30000;
 $GRAMMAR = << 'END_OF_GRAMMAR';
 
 { 
-    my ( $database_name, %tables, $table_order, @table_comments, %views, $view_order, %procedures, $proc_order );
+    my ( $database_name, %tables, $table_order, @table_comments, %views, $view_order, %procedures, $proc_order, %triggers, $trigger_order );
     my $delimiter = ';';
 }
 
@@ -185,7 +185,7 @@ $GRAMMAR = << 'END_OF_GRAMMAR';
 # failed. -ky
 #
 startrule : statement(s) eofile { 
-    { tables => \%tables, database_name => $database_name, views => \%views, procedures =>\%procedures } 
+    { tables => \%tables, database_name => $database_name, views => \%views, procedures =>\%procedures, triggers => \%triggers }
 }
 
 eofile : /^\Z/
@@ -317,9 +317,17 @@ create : CREATE UNIQUE(?) /(index|key)/i index_name /on/i table_name '(' field_n
         ;
     }
 
-create : CREATE /trigger/i NAME not_delimiter "$delimiter"
+create : CREATE (/DEFINER/i '=' NAME)(?) /TRIGGER/i NAME /BEFORE|AFTER/i /INSERT|UPDATE|DELETE/i /ON/i NAME /FOR/i /EACH/i /ROW/i statement_body "$delimiter"
     {
         @table_comments = ();
+        my $trigger_name = $item[4];
+        $triggers{ $trigger_name }{'order'}         = ++$trigger_order;
+        $triggers{ $trigger_name }{'name'}          = $trigger_name;
+        $triggers{ $trigger_name }{'mysql_definer'} = $item[2][0] if $item[2][0];
+        $triggers{ $trigger_name }{'time'}          = lc $item[5];
+        $triggers{ $trigger_name }{'event'}         = lc $item[6];
+        $triggers{ $trigger_name }{'table'}         = $item[8];
+        $triggers{ $trigger_name }{'action'}        = join('',@{$item[-2]});
     }
 
 create : CREATE PROCEDURE NAME not_delimiter "$delimiter"
@@ -913,6 +921,19 @@ sub parse {
         $schema->add_view(
             name => $view_name,
             sql  => $result->{views}->{$view_name}->{sql},
+        );
+    }
+
+    my @triggers = sort {
+        $result->{triggers}->{ $a }->{'order'} <=> $result->{triggers}->{ $b }->{'order'}
+    } keys %{ $result->{triggers} };
+    foreach my $trigger_name (@triggers) {
+        $schema->add_trigger(
+            name                =>  $trigger_name,
+            on_table            =>  $result->{triggers}->{$trigger_name}->{table},
+            database_events     => [$result->{triggers}->{$trigger_name}->{event}],
+            perform_action_when =>  $result->{triggers}->{$trigger_name}->{time},
+            action              =>  $result->{triggers}->{$trigger_name}->{action},
         );
     }
 
