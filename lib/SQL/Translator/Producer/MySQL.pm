@@ -653,7 +653,7 @@ sub create_index
     return join( ' ', 
                  lc $index->type eq 'normal' ? 'INDEX' : $index->type . ' INDEX',
                  truncate_id_uniquely( $index->name, $options->{max_id_length} || $DEFAULT_MAX_ID_LENGTH ),
-                 '(' . $qf . join( "$qf, $qf", $index->fields ) . $qf . ')'
+                 '(' . join (", ", map { s/(.*?)((?:\(\d+\))?)$/$qf$1$qf$2/; $_ } $index->fields) . ')'
                  );
 
 }
