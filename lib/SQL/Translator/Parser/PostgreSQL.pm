@@ -252,7 +252,11 @@ create : CREATE temporary_table(?) TABLE table_name '(' create_definition(s? /,/
         1;
     }
 
-create : CREATE unique(?) /(index|key)/i index_name /on/i table_name using_method(?) '(' field_name(s /,/) ')' where_predicate(?) ';'
+expression : /\w*\([^)]+\)/   { $return = join ' ',@item[1..$#item] }
+           | NAME /desc|asc/i { $return = join ' ',@item[1..$#item] }
+           | NAME             { $return = join ' ',@item[1..$#item] }
+
+create : CREATE unique(?) /(index|key)/i index_name /on/i table_name using_method(?) '(' expression(s /,/) ')' where_predicate(?) ';'
     {
         my $table_info  = $item{'table_name'};
         my $schema_name = $table_info->{'schema_name'};
@@ -262,7 +266,7 @@ create : CREATE unique(?) /(index|key)/i index_name /on/i table_name using_metho
                 name      => $item{'index_name'},
                 supertype => $item{'unique'}[0] ? 'constraint' : 'index',
                 type      => $item{'unique'}[0] ? 'unique'     : 'normal',
-                fields    => $item[9],
+                fields    => [ map { ref($_) eq 'ARRAY' ? @$_ : $_ } @{$item[9]} ],
                 method    => $item{'using_method'}[0],
                 where     => $item{'where_predicate(?)'}[0],
             }
@@ -889,8 +893,6 @@ readin_symbol : '\.'
 #
 
 create_table : CREATE TABLE
-
-create_index : CREATE /index/i
 
 default_val  : DEFAULT /(\d+|'[^']*'|\w+\(.*\))|\w+/
     { 
