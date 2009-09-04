@@ -549,7 +549,6 @@ sub create_view {
 
         my $type = $index->type || NORMAL;
         my @fields     = 
-            map { $_ =~ s/\(.+\)//; $_ }
         map { $qt ? $_ : unreserve($_, $table_name ) }
         $index->fields;
         next unless @fields;
@@ -566,7 +565,7 @@ sub create_view {
         elsif ( $type eq NORMAL ) {
             $index_def = 
                 "CREATE INDEX ${qf}${name}${qf} on ${qt}${table_name}${qt} (".
-                join( ', ', map { qq[$qf$_$qf] } @fields ).  
+                join( ', ', map { /[( )]/ ? $_ : qq[$qf$_$qf] } @fields ) .
                 ')'
                  . ( $where ? " WHERE " . $where : "" )
                 ; 
