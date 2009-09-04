@@ -545,6 +545,8 @@ sub create_view {
             $name = next_unused_name($name);
         }
 
+        my $where = $index->extra->{where};
+
         my $type = $index->type || NORMAL;
         my @fields     = 
             map { $_ =~ s/\(.+\)//; $_ }
@@ -566,6 +568,7 @@ sub create_view {
                 "CREATE INDEX ${qf}${name}${qf} on ${qt}${table_name}${qt} (".
                 join( ', ', map { qq[$qf$_$qf] } @fields ).  
                 ')'
+                 . ( $where ? " WHERE " . $where : "" )
                 ; 
         }
         else {

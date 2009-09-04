@@ -264,6 +264,7 @@ create : CREATE unique(?) /(index|key)/i index_name /on/i table_name using_metho
                 type      => $item{'unique'}[0] ? 'unique'     : 'normal',
                 fields    => $item[9],
                 method    => $item{'using_method'}[0],
+                where     => $item{'where_predicate(?)'}[0],
             }
         ;
 
@@ -277,7 +278,7 @@ create : CREATE WORD /[^;]+/ ';'
 
 using_method : /using/i WORD { $item[2] }
 
-where_predicate : /where/i /[^;]+/
+where_predicate : /where/i /[^;]+/ { $return = join ' ',@item[2..$#item] }
 
 create_definition : field
     | table_constraint
@@ -1046,6 +1047,7 @@ sub parse {
                 type   => uc $idata->{'type'},
                 fields => $idata->{'fields'},
             ) or die $table->error . ' ' . $table->name;
+            $index->extra(where => $idata->{'where'});
         }
 
         for my $cdata ( @{ $tdata->{'constraints'} || [] } ) {
