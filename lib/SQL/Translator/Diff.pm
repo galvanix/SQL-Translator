@@ -231,7 +231,7 @@ sub produce_diff_sql {
         add_drop_table => 0,
         no_comments => 1,
         # TODO: sort out options
-        %{ $self->producer_args }
+        producer_args => $self->producer_args,
       );
       $translator->producer_args->{no_transaction} = 1;
       my $schema = $translator->schema;
