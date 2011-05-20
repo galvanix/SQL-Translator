@@ -123,7 +123,7 @@ $::RD_HINT   = 1; # Give out hints to help fix problems.
 
 $GRAMMAR = q!
 
-{ my ( %tables, @views, $table_order, $field_order, @table_comments) }
+{ my ( %tables, @views, $table_order, $field_order, @table_comments, %enums) }
 
 #
 # The "eofile" rule makes the parser fail if any "statement" rule
@@ -284,6 +284,17 @@ create : CREATE or_replace(?) temporary(?) VIEW view_id view_fields(?) /AS/i vie
         }
     }
 
+enum_value : "'" /\w+/ "'" { $item[2] }
+
+create : CREATE /TYPE/i NAME /AS/i /ENUM/i '(' enum_value(s /,/) ')' ';'
+    {
+        die "duplicate enum $item{NAME}" if $enums{$item{NAME}};
+        $enums{$item{NAME}} = {
+            custom_type_name  => $item{NAME},
+            list              => $item{'enum_value(s)'},
+        }
+    }
+
 #
 # Create anything else (e.g., domain, etc.)
 #
@@ -406,6 +417,7 @@ field : field_comment(s?) field_name data_type field_meta(s?) field_comment(s?)
             comments          => [ @comments ],
             is_primary_key    => $is_pk || 0,
             is_auto_increment => $item{'data_type'}{'is_auto_increment'},
+            extra             => $item{'data_type'}{'extra'},
         } 
     }
     | <error>
@@ -634,6 +646,14 @@ pg_data_type :
     /(bit|box|cidr|circle|date|inet|line|lseg|macaddr|money|numeric|decimal|path|point|polygon|timetz|time|varchar)/i
         { 
             $return = { type => $item[1] };
+        }
+    |
+    /\w+/
+        {
+            $enums{$item[1]} and $return = {
+                type => 'enum',
+                extra => $enums{$item[1]},
+            };
         }
 
 parens_value_list : '(' VALUE(s /,/) ')'
@@ -1061,6 +1081,7 @@ sub parse {
                 is_auto_increment => $fdata->{'is_auto_increment'},
                 is_nullable       => $fdata->{'is_nullable'},
                 comments          => $fdata->{'comments'},
+                extra             => $fdata->{'extra'},
             ) or die $table->error;
 
             $table->primary_key( $field->name ) if $fdata->{'is_primary_key'};
