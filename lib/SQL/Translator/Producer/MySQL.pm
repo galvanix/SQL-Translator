@@ -312,11 +312,51 @@ sub produce {
       }
     }
 
+    if ($mysql_version >= 5.000002) {
+        for my $trigger ( $schema->get_triggers ) {
+            push @table_defs, create_trigger($trigger, {
+                add_drop_trigger  => $add_drop_table,
+                no_comments       => $no_comments,
+                quote_table_names => $qt,
+                quote_field_names => $qf,
+            });
+        }
+    } else {
+        warn "triggers not supported in mysql version '@{[$producer_args->{mysql_version} || 'unknown']}'";
+    }
 
 #    print "@table_defs\n";
     push @table_defs, "SET foreign_key_checks=1";
 
     return wantarray ? ($create ? $create : (), @create, @table_defs) : ($create . join('', map { $_ ? "$_;\n\n" : () } (@create, @table_defs)));
+}
+
+sub create_trigger {
+    my ($trigger, $options) = @_;
+    my $qt = $options->{quote_table_names} || '';
+    my $qf = $options->{quote_field_names} || '';
+
+    my $trigger_name = $trigger->name;
+    debug("PKG: Looking at trigger '${trigger_name}'\n");
+
+    my $create = '';
+    $create .= "--\n-- Trigger: ${qt}${trigger_name}${qt}\n--\n" unless $options->{no_comments};
+    for my $event (@{$trigger->database_events}) {
+        $create .= "CREATE";
+        $create .= " DEFINER = " . $trigger->{mysql_definer} if $trigger->{mysql_definer};
+        $create .= " TRIGGER ${qt}${trigger_name}".(@{$trigger->database_events} > 1 ? "_$event" : "")."${qt}";
+        $create .= " " . ( $trigger->perform_action_when eq 'after'  ? 'AFTER'
+                          :$trigger->perform_action_when eq 'before' ? 'BEFORE'
+                          :die "trigger ->{perform_action_when} must be 'before' or 'after'");
+        $create .= " " . ( $event eq 'insert' ? 'INSERT'
+                          :$event eq 'update' ? 'UPDATE'
+                          :$event eq 'delete' ? 'DELETE'
+                          :die "trigger ->{database_events} must be 'insert', 'update' or 'delete'");
+        $create .= " ON ${qt}".$trigger->on_table."${qt} FOR EACH ROW ";
+        $create .= $trigger->action;
+        $create .= ";\n\n";
+    }
+        return $create;
 }
 
 sub create_view {
