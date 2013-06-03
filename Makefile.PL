@@ -9,17 +9,16 @@ perl_version '5.008001';
 
 my $deps = {
   requires => {
-    'Class::Base'              => '0',
-    'Class::Data::Inheritable' => '0.02',
     'Digest::SHA'              => '0',
     'Carp::Clan'               => '0',
-    'IO::Scalar'               => '2.110',
     'Parse::RecDescent'        => '1.967009',
     'DBI'                      => '0',
     'File::ShareDir'           => '1.0',
-    'File::Spec'               => '0',
-    'XML::Writer'              => '0.500',
-    'Moo'                      => '0.009007',
+    'Moo'                      => '1.000003',
+    'Package::Variant'         => '1.001001',
+    'Sub::Quote'               => '0',
+    'Try::Tiny'                => '0.04',
+    'List::MoreUtils'          => '0.09',
   },
   recommends => {
     'Template'                 => '2.20',
@@ -27,12 +26,12 @@ my $deps = {
     'GraphViz'                 => '0',
     'Graph::Directed'          => '0',
     'Spreadsheet::ParseExcel'  => '0.41',
-    'Text::ParseWords'         => '0',
     'Text::RecordParser'       => '0.02',
     'XML::LibXML'              => '1.69',
   },
   test_requires => {
     'YAML'                     => '0.66',
+    'XML::Writer'              => '0.500',
     'Test::More'               => '0.88',
     'Test::Differences'        => '0',
     'Test::Exception'          => '0.31',
@@ -43,7 +42,7 @@ my $deps = {
 name        'SQL-Translator';
 author      'Ken Youens-Clark <kclark@cpan.org>';
 abstract    'SQL DDL transformations and more';
-license     'gpl';
+license     'perl';
 repository  'git://git.shadowcat.co.uk/dbsrgits/SQL-Translator.git';
 bugtracker  'http://rt.cpan.org/NoAuth/Bugs.html?Dist=SQL-Translator';
 
@@ -52,6 +51,7 @@ resources Ratings => 'http://cpanratings.perl.org/d/SQL-Translator';
 Meta->{values}{x_authority} = 'cpan:JROBINSON';
 
 all_from    'lib/SQL/Translator.pm';
+readme_from 'lib/SQL/Translator.pm';
 
 for my $type (qw/requires recommends test_requires/) {
   no strict qw/refs/;
@@ -60,13 +60,6 @@ for my $type (qw/requires recommends test_requires/) {
     $f->($mod, $deps->{$type}{$mod});
   }
 }
-
-no_index directory => $_ for (qw|
-  lib/SQL/Translator/Schema/Graph
-|);
-no_index package => $_ for (qw|
-  SQL::Translator::Schema::Graph
-|);
 
 install_script (qw|
   script/sqlt-diagram
