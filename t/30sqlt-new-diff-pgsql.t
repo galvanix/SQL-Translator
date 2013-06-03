@@ -25,7 +25,7 @@ my ( $source_schema, $target_schema, $parsed_sql_schema ) = map {
       or die $tr->error;
     my $out = $t->translate( catfile($Bin, qw/data diff pgsql/, $_ ) )
       or die $tr->error;
-    
+
     my $schema = $t->schema;
     unless ( $schema->name ) {
         $schema->name( $_ );
@@ -41,17 +41,18 @@ my $out = SQL::Translator::Diff::schema_diff(
    'PostgreSQL',
    {
      producer_args => {
-         quote_table_names => 0,
+         quote_identifiers => 0,
      }
    }
 );
+
 eq_or_diff($out, <<'## END OF DIFF', "Diff as expected");
 -- Convert schema 'create1.yml' to 'create2.yml':;
 
 BEGIN;
 
 CREATE TABLE added (
-  "id" bigint
+  id bigint
 );
 
 ALTER TABLE old_name RENAME TO new_name;
@@ -80,7 +81,7 @@ ALTER TABLE person RENAME COLUMN description TO physical_description;
 
 ALTER TABLE person ADD CONSTRAINT unique_name UNIQUE (name);
 
-ALTER TABLE employee ADD FOREIGN KEY (employee_id)
+ALTER TABLE employee ADD CONSTRAINT FK5302D47D93FE702E_diff FOREIGN KEY (employee_id)
   REFERENCES person (person_id) DEFERRABLE;
 
 ALTER TABLE person ADD CONSTRAINT UC_person_id UNIQUE (person_id);

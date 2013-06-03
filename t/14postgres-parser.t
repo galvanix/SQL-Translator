@@ -8,12 +8,12 @@ use SQL::Translator::Schema::Constants;
 use Test::SQL::Translator qw(maybe_plan);
 
 BEGIN {
-    maybe_plan(129, 'SQL::Translator::Parser::PostgreSQL');
+    maybe_plan(140, 'SQL::Translator::Parser::PostgreSQL');
     SQL::Translator::Parser::PostgreSQL->import('parse');
 }
 
 my $t   = SQL::Translator->new( trace => 0 );
-my $sql = q[
+my $sql = q{
     -- comment on t_test1
     create table t_test1 (
         -- this is the primary key
@@ -21,10 +21,10 @@ my $sql = q[
         f_varchar character varying (255),
         f_double double precision,
         f_bigint bigint not null,
-        f_char character(10) default 'FOO',
+        f_char character(10) default 'FOO'::character(10),
         f_bool boolean,
         f_bin bytea,
-        f_tz timestamp,
+        f_tz timestamp default '1970-01-01 00:00:00'::TIMESTAMP,
         f_text text,
         f_fk1 integer not null references t_test2 (f_id),
         f_dropped text,
@@ -36,6 +36,7 @@ my $sql = q[
         f_id integer NOT NULL,
         f_varchar varchar(25),
         f_int smallint,
+        f_smallint smallint default (0)::smallint,
         primary key (f_id),
         check (f_int between 1 and 5)
     );
@@ -45,7 +46,7 @@ my $sql = q[
         name text,
         price numeric
     );
-    
+
     CREATE TEMP TABLE products_2 (
         product_no integer,
         name text,
@@ -57,6 +58,12 @@ my $sql = q[
         name text,
         price numeric
     );
+
+  CREATE TRIGGER test_trigger
+    BEFORE INSERT OR UPDATE OR DELETE
+    ON products_1
+    FOR EACH ROW
+    EXECUTE PROCEDURE foo();
 
     alter table t_test1 add f_fk2 integer;
 
@@ -73,7 +80,7 @@ my $sql = q[
 
     alter table t_test1 alter column f_char drop default;
 
-    -- The following are allowed by the grammar 
+    -- The following are allowed by the grammar
     -- but won\'t do anything... - ky
 
     alter table t_text1 alter column f_char set not null;
@@ -83,7 +90,7 @@ my $sql = q[
     alter table t_test1 alter f_char set statistics 10;
 
     alter table t_test1 alter f_text set storage extended;
-    
+
     alter table t_test1 rename column f_text to foo;
 
     alter table t_test1 rename to foo;
@@ -93,7 +100,7 @@ my $sql = q[
     alter table t_test1 owner to foo;
 
     commit;
-];
+};
 
 $| = 1;
 
@@ -176,7 +183,7 @@ is( $f8->name, 'f_tz', 'Eighth field is "f_tz"' );
 is( $f8->data_type, 'timestamp', 'Field is a timestamp' );
 is( $f8->is_nullable, 1, 'Field can be null' );
 is( $f8->size, 0, 'Size is "0"' );
-is( $f8->default_value, undef, 'Default value is undefined' );
+is( $f8->default_value, '1970-01-01 00:00:00', 'Default value is 1970-01-01 00:00:00' );
 is( $f8->is_primary_key, 0, 'Field is not PK' );
 
 my $f9 = shift @t1_fields;
@@ -252,7 +259,7 @@ my $t2 = shift @tables;
 is( $t2->name, 't_test2', 'Table t_test2 exists' );
 
 my @t2_fields = $t2->get_fields;
-is( scalar @t2_fields, 3, '3 fields in t_test2' );
+is( scalar @t2_fields, 4, '4 fields in t_test2' );
 
 my $t2_f1 = shift @t2_fields;
 is( $t2_f1->name, 'f_id', 'First field is "f_id"' );
@@ -278,6 +285,15 @@ is( $t2_f3->size, 5, 'Size is "5"' );
 is( $t2_f3->default_value, undef, 'Default value is undefined' );
 is( $t2_f3->is_primary_key, 0, 'Field is not PK' );
 
+my $t2_f4 = shift @t2_fields;
+is( $t2_f4->name, 'f_smallint', 'Fourth field is "f_smallint"' );
+is( $t2_f4->data_type, 'integer', 'Field is an integer' );
+is( $t2_f4->is_nullable, 1, 'Field can be null' );
+is( $t2_f4->size, 5, 'Size is "5"' );
+is( $t2_f4->default_value, 0, 'Default value is 0' );
+is( $t2_f4->is_primary_key, 0, 'Field is not PK' );
+
+
 my @t2_constraints = $t2->get_constraints;
 is( scalar @t2_constraints, 3, "Three constraints on table" );
 
@@ -294,3 +310,12 @@ is( $t2_c3->type, CHECK_C, "Constraint is a 'CHECK'" );
 is( exists $schema->get_table('products_1')->extra()->{'temporary'}, "", "Table is NOT temporary");
 is( $schema->get_table('products_2')->extra('temporary'), 1,"Table is TEMP");
 is( $schema->get_table('products_3')->extra('temporary'), 1,"Table is TEMPORARY");
+
+# test trigger
+my $trigger = $schema->get_trigger('test_trigger');
+is( $trigger->on_table, 'products_1', "Trigger is on correct table");
+is_deeply( scalar $trigger->database_events, [qw(insert update delete)], "Correct events for trigger");
+
+is( $trigger->perform_action_when, 'before', "Correct time for trigger");
+is( $trigger->scope, 'row', "Correct scope for trigger");
+is( $trigger->action, 'EXECUTE PROCEDURE foo()', "Correct action for trigger");

@@ -19,7 +19,7 @@ use FindBin qw/$Bin/;
 #=============================================================================
 
 BEGIN {
-    maybe_plan(72,
+    maybe_plan(73,
         'YAML',
         'SQL::Translator::Producer::MySQL',
         'Test::Differences',
@@ -37,8 +37,8 @@ schema:
     thing:
       name: thing
       extra:
-        mysql_charset: latin1 
-        mysql_collate: latin1_danish_ci 
+        mysql_charset: latin1
+        mysql_collate: latin1_danish_ci
       order: 1
       fields:
         id:
@@ -46,27 +46,27 @@ schema:
           data_type: unsigned int
           is_primary_key: 1
           is_auto_increment: 1
-          order: 0
+          order: 1
         name:
           name: name
           data_type: varchar
           size:
             - 32
-          order: 1
+          order: 2
         swedish_name:
           name: swedish_name
           data_type: varchar
           size: 32
           extra:
             mysql_charset: swe7
-          order: 2
+          order: 3
         description:
           name: description
           data_type: text
           extra:
             mysql_charset: utf8
             mysql_collate: utf8_general_ci
-          order: 3
+          order: 4
       constraints:
         - type: UNIQUE
           fields:
@@ -82,22 +82,22 @@ schema:
           name: id
           data_type: int
           is_primary_key: 0
-          order: 0
+          order: 1
           is_foreign_key: 1
         foo:
           name: foo
           data_type: int
-          order: 1
+          order: 2
           is_not_null: 1
         foo2:
           name: foo2
           data_type: int
-          order: 2
+          order: 3
           is_not_null: 1
         bar_set:
           name: bar_set
           data_type: set
-          order: 3
+          order: 4
           is_not_null: 1
           extra:
             list:
@@ -130,28 +130,28 @@ schema:
     thing3:
       name: some.thing3
       extra:
-      order: 2
+      order: 3
       fields:
         id:
           name: id
           data_type: int
           is_primary_key: 0
-          order: 0
+          order: 1
           is_foreign_key: 1
         foo:
           name: foo
           data_type: int
-          order: 1
+          order: 2
           is_not_null: 1
         foo2:
           name: foo2
           data_type: int
-          order: 2
+          order: 3
           is_not_null: 1
         bar_set:
           name: bar_set
           data_type: set
-          order: 3
+          order: 4
           is_not_null: 1
           extra:
             list:
@@ -254,8 +254,8 @@ my $mysql_out = join(";\n\n", @stmts_no_drop) . ";\n\n";
       or die "Translat eerror:".$sqlt->error;
     is_deeply \@out, \@stmts_no_drop, "Array output looks right with quoting";
 
+    $sqlt->quote_identifiers(0);
 
-    @{$sqlt}{qw/quote_table_names quote_field_names/} = (0,0);
     $out = $sqlt->translate(\$yaml_in)
       or die "Translate error:".$sqlt->error;
 
@@ -266,7 +266,9 @@ my $mysql_out = join(";\n\n", @stmts_no_drop) . ";\n\n";
     eq_or_diff $out, $mysql_out,       "Output looks right without quoting";
     is_deeply \@out, \@unquoted_stmts, "Array output looks right without quoting";
 
-    @{$sqlt}{qw/add_drop_table quote_field_names quote_table_names/} = (1,1,1);
+    $sqlt->quote_identifiers(1);
+    $sqlt->add_drop_table(1);
+
     @out = $sqlt->translate(\$yaml_in)
       or die "Translat eerror:".$sqlt->error;
     $out = $sqlt->translate(\$yaml_in)
@@ -339,14 +341,14 @@ my $number_sizes = {
 };
 for my $size (keys %$number_sizes) {
     my $expected = $number_sizes->{$size};
-    my $number_field = SQL::Translator::Schema::Field->new( 
+    my $number_field = SQL::Translator::Schema::Field->new(
         name => "numberfield_$expected",
         table => $table,
         data_type => 'number',
         size => $size,
         is_nullable => 1,
         is_foreign_key => 0,
-        is_unique => 0 
+        is_unique => 0
     );
 
     is(
@@ -358,7 +360,7 @@ for my $size (keys %$number_sizes) {
 
 my $varchars;
 for my $size (qw/255 256 65535 65536/) {
-    $varchars->{$size} = SQL::Translator::Schema::Field->new( 
+    $varchars->{$size} = SQL::Translator::Schema::Field->new(
         name => "vch_$size",
         table => $table,
         data_type => 'varchar',
@@ -370,68 +372,68 @@ for my $size (qw/255 256 65535 65536/) {
 
 is (
     SQL::Translator::Producer::MySQL::create_field($varchars->{255}, { mysql_version => 5.000003 }),
-    'vch_255 varchar(255)', 
+    'vch_255 varchar(255)',
     'VARCHAR(255) is not substituted with TEXT for Mysql >= 5.0.3'
 );
 is (
     SQL::Translator::Producer::MySQL::create_field($varchars->{255}, { mysql_version => 5.0 }),
-    'vch_255 varchar(255)', 
+    'vch_255 varchar(255)',
     'VARCHAR(255) is not substituted with TEXT for Mysql < 5.0.3'
 );
 is (
     SQL::Translator::Producer::MySQL::create_field($varchars->{255}),
-    'vch_255 varchar(255)', 
+    'vch_255 varchar(255)',
     'VARCHAR(255) is not substituted with TEXT when no version specified',
 );
 
 
 is (
     SQL::Translator::Producer::MySQL::create_field($varchars->{256}, { mysql_version => 5.000003 }),
-    'vch_256 varchar(256)', 
+    'vch_256 varchar(256)',
     'VARCHAR(256) is not substituted with TEXT for Mysql >= 5.0.3'
 );
 is (
     SQL::Translator::Producer::MySQL::create_field($varchars->{256}, { mysql_version => 5.0 }),
-    'vch_256 text', 
+    'vch_256 text',
     'VARCHAR(256) is substituted with TEXT for Mysql < 5.0.3'
 );
 is (
     SQL::Translator::Producer::MySQL::create_field($varchars->{256}),
-    'vch_256 text', 
+    'vch_256 text',
     'VARCHAR(256) is substituted with TEXT when no version specified',
 );
 
 
 is (
     SQL::Translator::Producer::MySQL::create_field($varchars->{65535}, { mysql_version => 5.000003 }),
-    'vch_65535 varchar(65535)', 
+    'vch_65535 varchar(65535)',
     'VARCHAR(65535) is not substituted with TEXT for Mysql >= 5.0.3'
 );
 is (
     SQL::Translator::Producer::MySQL::create_field($varchars->{65535}, { mysql_version => 5.0 }),
-    'vch_65535 text', 
+    'vch_65535 text',
     'VARCHAR(65535) is substituted with TEXT for Mysql < 5.0.3'
 );
 is (
     SQL::Translator::Producer::MySQL::create_field($varchars->{65535}),
-    'vch_65535 text', 
+    'vch_65535 text',
     'VARCHAR(65535) is substituted with TEXT when no version specified',
 );
 
 
 is (
     SQL::Translator::Producer::MySQL::create_field($varchars->{65536}, { mysql_version => 5.000003 }),
-    'vch_65536 text', 
+    'vch_65536 text',
     'VARCHAR(65536) is substituted with TEXT for Mysql >= 5.0.3'
 );
 is (
     SQL::Translator::Producer::MySQL::create_field($varchars->{65536}, { mysql_version => 5.0 }),
-    'vch_65536 text', 
+    'vch_65536 text',
     'VARCHAR(65536) is substituted with TEXT for Mysql < 5.0.3'
 );
 is (
     SQL::Translator::Producer::MySQL::create_field($varchars->{65536}),
-    'vch_65536 text', 
+    'vch_65536 text',
     'VARCHAR(65536) is substituted with TEXT when no version specified',
 );
 
@@ -560,7 +562,7 @@ EOV
         quote_field_names => $qf,
     };
 
-    
+
     my $alter_field = SQL::Translator::Producer::MySQL::alter_field($field1, $field2, $options);
     is($alter_field, 'ALTER TABLE `mydb`.`mytable` CHANGE COLUMN `myfield` `myfield` VARCHAR(25) NOT NULL', 'Alter field works');
 
@@ -586,14 +588,14 @@ is($field3_sql, "`myfield` enum('0','1') NOT NULL", 'When no version specified, 
     };
     for my $size (keys %$number_sizes) {
         my $expected = $number_sizes->{$size};
-        my $number_field = SQL::Translator::Schema::Field->new( 
+        my $number_field = SQL::Translator::Schema::Field->new(
             name => "numberfield_$expected",
             table => $table,
             data_type => 'number',
             size => $size,
             is_nullable => 1,
             is_foreign_key => 0,
-            is_unique => 0 
+            is_unique => 0
         );
 
         is(
@@ -605,7 +607,7 @@ is($field3_sql, "`myfield` enum('0','1') NOT NULL", 'When no version specified, 
 
     my $varchars;
     for my $size (qw/255 256 65535 65536/) {
-        $varchars->{$size} = SQL::Translator::Schema::Field->new( 
+        $varchars->{$size} = SQL::Translator::Schema::Field->new(
             name => "vch_$size",
             table => $table,
             data_type => 'varchar',
@@ -617,68 +619,68 @@ is($field3_sql, "`myfield` enum('0','1') NOT NULL", 'When no version specified, 
 
     is (
         SQL::Translator::Producer::MySQL::create_field($varchars->{255}, { mysql_version => 5.000003, %$options }),
-        '`vch_255` varchar(255)', 
+        '`vch_255` varchar(255)',
         'VARCHAR(255) is not substituted with TEXT for Mysql >= 5.0.3'
     );
     is (
         SQL::Translator::Producer::MySQL::create_field($varchars->{255}, { mysql_version => 5.0, %$options }),
-        '`vch_255` varchar(255)', 
+        '`vch_255` varchar(255)',
         'VARCHAR(255) is not substituted with TEXT for Mysql < 5.0.3'
     );
     is (
         SQL::Translator::Producer::MySQL::create_field($varchars->{255}, $options),
-        '`vch_255` varchar(255)', 
+        '`vch_255` varchar(255)',
         'VARCHAR(255) is not substituted with TEXT when no version specified',
     );
 
 
     is (
         SQL::Translator::Producer::MySQL::create_field($varchars->{256}, { mysql_version => 5.000003, %$options }),
-        '`vch_256` varchar(256)', 
+        '`vch_256` varchar(256)',
         'VARCHAR(256) is not substituted with TEXT for Mysql >= 5.0.3'
     );
     is (
         SQL::Translator::Producer::MySQL::create_field($varchars->{256}, { mysql_version => 5.0, %$options }),
-        '`vch_256` text', 
+        '`vch_256` text',
         'VARCHAR(256) is substituted with TEXT for Mysql < 5.0.3'
     );
     is (
         SQL::Translator::Producer::MySQL::create_field($varchars->{256}, $options),
-        '`vch_256` text', 
+        '`vch_256` text',
         'VARCHAR(256) is substituted with TEXT when no version specified',
     );
 
 
     is (
         SQL::Translator::Producer::MySQL::create_field($varchars->{65535}, { mysql_version => 5.000003, %$options }),
-        '`vch_65535` varchar(65535)', 
+        '`vch_65535` varchar(65535)',
         'VARCHAR(65535) is not substituted with TEXT for Mysql >= 5.0.3'
     );
     is (
         SQL::Translator::Producer::MySQL::create_field($varchars->{65535}, { mysql_version => 5.0, %$options }),
-        '`vch_65535` text', 
+        '`vch_65535` text',
         'VARCHAR(65535) is substituted with TEXT for Mysql < 5.0.3'
     );
     is (
         SQL::Translator::Producer::MySQL::create_field($varchars->{65535}, $options),
-        '`vch_65535` text', 
+        '`vch_65535` text',
         'VARCHAR(65535) is substituted with TEXT when no version specified',
     );
 
 
     is (
         SQL::Translator::Producer::MySQL::create_field($varchars->{65536}, { mysql_version => 5.000003, %$options }),
-        '`vch_65536` text', 
+        '`vch_65536` text',
         'VARCHAR(65536) is substituted with TEXT for Mysql >= 5.0.3'
     );
     is (
         SQL::Translator::Producer::MySQL::create_field($varchars->{65536}, { mysql_version => 5.0, %$options }),
-        '`vch_65536` text', 
+        '`vch_65536` text',
         'VARCHAR(65536) is substituted with TEXT for Mysql < 5.0.3'
     );
     is (
         SQL::Translator::Producer::MySQL::create_field($varchars->{65536}, $options),
-        '`vch_65536` text', 
+        '`vch_65536` text',
         'VARCHAR(65536) is substituted with TEXT when no version specified',
     );
 
@@ -763,4 +765,23 @@ EOV
             is($sql, "`my$type` $type", "Skip length param for type $type");
         }
     }
+}
+
+{ # test for rt62250
+    my $table = SQL::Translator::Schema::Table->new(name => 'table');
+    $table->add_field(
+        SQL::Translator::Schema::Field->new( name => 'mypk',
+                                             table => $table,
+                                             data_type => 'INT',
+                                             size => 10,
+                                             default_value => undef,
+                                             is_auto_increment => 1,
+                                             is_nullable => 0,
+                                             is_foreign_key => 0,
+                                             is_unique => 1 ));
+
+    my $constraint = $table->add_constraint(fields => ['mypk'], type => 'PRIMARY_KEY');
+    my $options = {quote_table_names => '`'};
+    is(SQL::Translator::Producer::MySQL::alter_drop_constraint($constraint,$options),
+       'ALTER TABLE `table` DROP PRIMARY KEY','valid drop primary key');
 }
