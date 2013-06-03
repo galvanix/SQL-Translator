@@ -656,6 +656,14 @@ pg_data_type :
             };
         }
     |
+    /json/i
+        {
+            $return = {
+                type => 'json',
+                size => 64_000,
+            };
+        }
+    |
     /(bit|box|cidr|circle|date|inet|line|lseg|macaddr|money|numeric|decimal|path|point|polygon|timetz|time|varchar)/i
         {
             $return = { type => $item[1] };
