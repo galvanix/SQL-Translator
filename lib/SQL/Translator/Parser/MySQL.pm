@@ -159,8 +159,7 @@ use base qw(Exporter);
 
 use SQL::Translator::Utils qw/parse_mysql_version/;
 
-our %type_mapping = (
-);
+our %type_mapping = ();
 
 @EXPORT_OK = qw(parse);
 
@@ -174,7 +173,8 @@ use constant DEFAULT_PARSER_VERSION => 30000;
 $GRAMMAR = << 'END_OF_GRAMMAR';
 
 { 
-    my ( $database_name, %tables, $table_order, @table_comments, %views, $view_order, %procedures, $proc_order, %triggers, $trigger_order );
+    my ( $database_name, %tables, $table_order, @table_comments, %views,
+        $view_order, %procedures, $proc_order );
     my $delimiter = ';';
 }
 
@@ -185,7 +185,12 @@ $GRAMMAR = << 'END_OF_GRAMMAR';
 # failed. -ky
 #
 startrule : statement(s) eofile { 
-    { tables => \%tables, database_name => $database_name, views => \%views, procedures =>\%procedures, triggers => \%triggers }
+    { 
+        database_name => $database_name, 
+        tables        => \%tables, 
+        views         => \%views, 
+        procedures    => \%procedures,
+    } 
 }
 
 eofile : /^\Z/
@@ -224,11 +229,11 @@ string :
    /"(\\.|""|[^\\\"])*"/
   # For reference, std sql str: /(?:(?:\')(?:[^\']*(?:(?:\'\')[^\']*)*)(?:\'))//
 
-nonstring : /[^\Q$delimiter\E\'"]+/
+nonstring : /[^;\'"]+/
 
-statement_body : (string | nonstring)(s?)
+statement_body : string | nonstring
 
-insert : /insert/i  statement_body "$delimiter"
+insert : /insert/i  statement_body(s?) "$delimiter"
 
 delimiter : /delimiter/i /[\S]+/
     { $delimiter = $item[2] }
@@ -317,17 +322,9 @@ create : CREATE UNIQUE(?) /(index|key)/i index_name /on/i table_name '(' field_n
         ;
     }
 
-create : CREATE (/DEFINER/i '=' NAME)(?) /TRIGGER/i NAME /BEFORE|AFTER/i /INSERT|UPDATE|DELETE/i /ON/i NAME /FOR/i /EACH/i /ROW/i statement_body "$delimiter"
+create : CREATE /trigger/i NAME not_delimiter "$delimiter"
     {
         @table_comments = ();
-        my $trigger_name = $item[4];
-        $triggers{ $trigger_name }{'order'}         = ++$trigger_order;
-        $triggers{ $trigger_name }{'name'}          = $trigger_name;
-        $triggers{ $trigger_name }{'mysql_definer'} = $item[2][0] if $item[2][0];
-        $triggers{ $trigger_name }{'time'}          = lc $item[5];
-        $triggers{ $trigger_name }{'event'}         = lc $item[6];
-        $triggers{ $trigger_name }{'table'}         = $item[8];
-        $triggers{ $trigger_name }{'action'}        = join('',@{$item[-2]});
     }
 
 create : CREATE PROCEDURE NAME not_delimiter "$delimiter"
@@ -346,11 +343,12 @@ create : CREATE PROCEDURE NAME not_delimiter "$delimiter"
 PROCEDURE : /procedure/i
     | /function/i
 
-create : CREATE algorithm /view/i NAME not_delimiter "$delimiter"
+create : CREATE replace(?) algorithm(?) /view/i NAME not_delimiter "$delimiter"
     {
         @table_comments = ();
-        my $view_name = $item[4];
-        my $sql = "$item[1] $item[2] $item[3] $item[4] $item[5]";
+        my $view_name = $item[5];
+        my $sql = join(q{ }, grep { defined and length } $item[1], $item[2]->[0], $item[3]->[0])
+            . " $item[4] $item[5] $item[6]";
         
         # Hack to strip database from function calls in SQL
         $sql =~ s#`\w+`\.(`\w+`\()##g;
@@ -359,6 +357,8 @@ create : CREATE algorithm /view/i NAME not_delimiter "$delimiter"
         $views{ $view_name }{'name'}   = $view_name;
         $views{ $view_name }{'sql'}    = $sql;
     }
+
+replace : /or replace/i
 
 algorithm : /algorithm/i /=/ WORD
     {
@@ -594,19 +594,13 @@ not_null     : /not/i /null/i
 
 unsigned     : /unsigned/i { $return = 0 }
 
-#default_val  : /default/i /(?:')?[\s\w\d:.-]*(?:')?/ 
-#    { 
-#        $item[2] =~ s/'//g; 
-#        $return  =  $item[2];
-#    }
-
 default_val : 
     /default/i 'CURRENT_TIMESTAMP'
     {
         $return =  \$item[2];
     }
     |
-    /default/i /'(?:.*?\\')*.*?'|(?:')?[\w\d:.-]*(?:')?/
+    /default/i /'(?:.*?(?:\\'|''))*.*?'|(?:')?[\w\d:.-]*(?:')?/
     {
         $item[2] =~ s/^\s*'|'\s*$//g;
         $return  =  $item[2];
@@ -647,35 +641,43 @@ foreign_key_def_begin : /constraint/i /foreign key/i WORD
     /foreign key/i
     { $return = '' }
 
-primary_key_def : primary_key index_name(?) '(' name_with_opt_paren(s /,/) ')'
+primary_key_def : primary_key index_name_not_using(?) index_type(?) '(' name_with_opt_paren(s /,/) ')' index_type(?)
     { 
         $return       = { 
             supertype => 'constraint',
-            name      => $item{'index_name(?)'}[0],
+            name      => $item[2][0],
             type      => 'primary_key',
-            fields    => $item[4],
+            fields    => $item[5],
+            options   => $item[3][0] || $item[7][0],
         };
     }
 
-unique_key_def : UNIQUE KEY(?) index_name(?) '(' name_with_opt_paren(s /,/) ')'
+unique_key_def : UNIQUE KEY(?) index_name_not_using(?) index_type(?) '(' name_with_opt_paren(s /,/) ')' index_type(?)
     { 
         $return       = { 
             supertype => 'constraint',
-            name      => $item{'index_name(?)'}[0],
+            name      => $item[3][0],
             type      => 'unique',
-            fields    => $item[5],
+            fields    => $item[6],
+            options   => $item[4][0] || $item[8][0],
         } 
     }
 
-normal_index : KEY index_name(?) '(' name_with_opt_paren(s /,/) ')'
+normal_index : KEY index_name_not_using(?) index_type(?) '(' name_with_opt_paren(s /,/) ')' index_type(?)
     { 
         $return       = { 
             supertype => 'index',
             type      => 'normal',
-            name      => $item{'index_name(?)'}[0],
-            fields    => $item[4],
-        } 
+            name      => $item[2][0],
+            fields    => $item[5],
+            options   => $item[3][0] || $item[7][0],
+        }
     }
+
+index_name_not_using : QUOTED_NAME
+    | /(\b(?!using)\w+\b)/ { $return = ($1 =~ /^using/i) ? undef : $1 }
+
+index_type : /using (btree|hash|rtree)/i { $return = uc $1 }
 
 fulltext_index : /fulltext/i KEY(?) index_name(?) '(' name_with_opt_paren(s /,/) ')'
     { 
@@ -723,11 +725,17 @@ table_option : /comment/i /=/ /'.*?'/
     { 
         $return = { $item[1] => $item[4] };
     }
-    | WORD /\s*=\s*/ WORD
-    { 
+    | WORD /\s*=\s*/ MAYBE_QUOTED_WORD
+    {
         $return = { $item[1] => $item[3] };
     }
-    
+
+MAYBE_QUOTED_WORD: /\w+/
+                 | /'(\w+)'/
+                 { $return = $1 }
+                 | /"(\w+)"/
+                 { $return = $1 }
+
 default : /default/i
 
 ADD : /add/i
@@ -748,12 +756,17 @@ COMMA : ','
 
 BACKTICK : '`'
 
-NAME    : BACKTICK /[^`]+/ BACKTICK
-    { $item[2] }
-    | /\w+/
-    { $item[1] }
+DOUBLE_QUOTE: '"'
 
-VALUE   : /[-+]?\.?\d+(?:[eE]\d+)?/
+QUOTED_NAME : BACKTICK /[^`]+/ BACKTICK
+    { $item[2] }
+    | DOUBLE_QUOTE /[^"]+/ DOUBLE_QUOTE
+    { $item[2] }
+
+NAME: QUOTED_NAME
+    | /\w+/ 
+
+VALUE : /[-+]?\.?\d+(?:[eE]\d+)?/
     { $item[1] }
     | /'.*?'/   
     { 
@@ -783,11 +796,17 @@ sub parse {
             "instance: Bad grammer");
     }
     
-    # Preprocess for MySQL-specific and not-before-version comments from mysqldump
-    my $parser_version = 
-        parse_mysql_version ($translator->parser_args->{mysql_parser_version}, 'mysql') 
-        || DEFAULT_PARSER_VERSION;
-    while ( $data =~ s#/\*!(\d{5})?(.*?)\*/#($1 && $1 > $parser_version ? '' : $2)#es ) {}
+    # Preprocess for MySQL-specific and not-before-version comments
+    # from mysqldump
+    my $parser_version = parse_mysql_version(
+        $translator->parser_args->{mysql_parser_version}, 'mysql'
+    ) || DEFAULT_PARSER_VERSION;
+
+    while ( $data =~ 
+        s#/\*!(\d{5})?(.*?)\*/#($1 && $1 > $parser_version ? '' : $2)#es 
+    ) {
+        # do nothing; is there a better way to write this? -- ky
+    }
 
     my $result = $parser->startrule($data);
     return $translator->error( "Parse failed." ) unless defined $result;
@@ -872,13 +891,17 @@ sub parse {
 
         if ( my @options = @{ $tdata->{'table_options'} || [] } ) {
             my @cleaned_options;
-            my @ignore_opts = $translator->parser_args->{ignore_opts}?split(/,/,$translator->parser_args->{ignore_opts}):();
+            my @ignore_opts = $translator->parser_args->{'ignore_opts'}
+                ? split( /,/, $translator->parser_args->{'ignore_opts'} )
+                : ();
             if (@ignore_opts) {
                 my $ignores = { map { $_ => 1 } @ignore_opts };
                 foreach my $option (@options) {
                     # make sure the option isn't in ignore list
                     my ($option_key) = keys %$option;
-                    push(@cleaned_options, $option) unless (exists $ignores->{$option_key});
+                    if ( !exists $ignores->{$option_key} ) {
+                        push @cleaned_options, $option;
+                    }
                 }
             } else {
                 @cleaned_options = @options;
@@ -894,46 +917,41 @@ sub parse {
                 reference_table  => $cdata->{'reference_table'},
                 reference_fields => $cdata->{'reference_fields'},
                 match_type       => $cdata->{'match_type'} || '',
-                on_delete        => $cdata->{'on_delete'} || $cdata->{'on_delete_do'},
-                on_update        => $cdata->{'on_update'} || $cdata->{'on_update_do'},
+                on_delete        => $cdata->{'on_delete'} 
+                                 || $cdata->{'on_delete_do'},
+                on_update        => $cdata->{'on_update'} 
+                                 || $cdata->{'on_update_do'},
             ) or die $table->error;
         }
 
-        # After the constrains and PK/idxs have been created, we normalize fields
+        # After the constrains and PK/idxs have been created, 
+        # we normalize fields
         normalize_field($_) for $table->get_fields;
     }
     
     my @procedures = sort { 
-        $result->{procedures}->{ $a }->{'order'} <=> $result->{procedures}->{ $b }->{'order'}
+        $result->{procedures}->{ $a }->{'order'} 
+        <=> 
+        $result->{procedures}->{ $b }->{'order'}
     } keys %{ $result->{procedures} };
-    foreach my $proc_name (@procedures) {
+
+    for my $proc_name ( @procedures ) {
         $schema->add_procedure(
             name  => $proc_name,
             owner => $result->{procedures}->{$proc_name}->{owner},
             sql   => $result->{procedures}->{$proc_name}->{sql},
         );
     }
-
     my @views = sort { 
-        $result->{views}->{ $a }->{'order'} <=> $result->{views}->{ $b }->{'order'}
+        $result->{views}->{ $a }->{'order'} 
+        <=> 
+        $result->{views}->{ $b }->{'order'}
     } keys %{ $result->{views} };
-    foreach my $view_name (@views) {
+
+    for my $view_name ( @views ) {
         $schema->add_view(
             name => $view_name,
-            sql  => $result->{views}->{$view_name}->{sql},
-        );
-    }
-
-    my @triggers = sort {
-        $result->{triggers}->{ $a }->{'order'} <=> $result->{triggers}->{ $b }->{'order'}
-    } keys %{ $result->{triggers} };
-    foreach my $trigger_name (@triggers) {
-        $schema->add_trigger(
-            name                =>  $trigger_name,
-            on_table            =>  $result->{triggers}->{$trigger_name}->{table},
-            database_events     => [$result->{triggers}->{$trigger_name}->{event}],
-            perform_action_when =>  $result->{triggers}->{$trigger_name}->{time},
-            action              =>  $result->{triggers}->{$trigger_name}->{action},
+            sql  => $result->{'views'}->{$view_name}->{sql},
         );
     }
 
@@ -973,8 +991,10 @@ sub normalize_field {
         }
         elsif ( lc $type =~ /(float|double|decimal|numeric|real|fixed|dec)/ ) {
             my $old_size = (ref $size || '') eq 'ARRAY' ? $size : [];
-            $changed = @$old_size != 2 || $old_size->[0] != 8 || $old_size->[1] != 2;
-            $size = [8,2];
+            $changed     = @$old_size != 2 
+                        || $old_size->[0] != 8 
+                        || $old_size->[1] != 2;
+            $size        = [8,2];
         }
     }
 
@@ -994,6 +1014,7 @@ sub normalize_field {
         $changed = $size != 4_294_967_295;
         $size = 4_294_967_295;
     }
+
     if ( $field->data_type =~ /(set|enum)/i && !$field->size ) {
         my %extra = $field->extra;
         my $longest = 0;
@@ -1005,19 +1026,20 @@ sub normalize_field {
     }
 
 
-    if ($changed) {
-      # We only want to clone the field, not *everything*
-      { local $field->{table} = undef;
-        $field->parsed_field(dclone($field));
-        $field->parsed_field->{table} = $field->table;
-      }
-      $field->size($size);
-      $field->data_type($type);
-      $field->sql_data_type( $type_mapping{lc $type} ) if exists $type_mapping{lc $type};
-      $field->extra->{list} = $list if @$list;
+    if ( $changed ) {
+        # We only want to clone the field, not *everything*
+        {
+            local $field->{table} = undef;
+            $field->parsed_field( dclone( $field ) );
+            $field->parsed_field->{table} = $field->table;
+        }
+        $field->size( $size );
+        $field->data_type( $type );
+        $field->sql_data_type( $type_mapping{ lc $type } )
+            if exists $type_mapping{ lc $type };
+        $field->extra->{list} = $list if @$list;
     }
 }
-
 
 1;
 

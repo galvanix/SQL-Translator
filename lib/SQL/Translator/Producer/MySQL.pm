@@ -45,7 +45,7 @@ provides the desired version for the target database. By default MySQL v3 is
 assumed, and statements pertaining to any features introduced in later versions
 (e.g. CREATE VIEW) are not produced.
 
-Valid version specifiers for C<mysql_parser_version> are listed L<here|SQL::Translator::Utils/parse_mysql_version> 
+Valid version specifiers for C<mysql_version> are listed L<here|SQL::Translator::Utils/parse_mysql_version> 
 
 =head2 Table Types
 
@@ -81,9 +81,9 @@ Set the type of the table e.g. 'InnoDB', 'MyISAM'. This will be
 automatically set for tables involved in foreign key constraints if it is
 not already set explicitly. See L<"Table Types">.
 
-Please note that the C<ENGINE> option is the prefered method of specifying
+Please note that the C<ENGINE> option is the preferred method of specifying
 the MySQL storage engine to use, but this method still works for backwards
-compatability.
+compatibility.
 
 =item B<table.mysql_charset>, B<table.mysql_collate>
 
@@ -110,7 +110,8 @@ my $DEFAULT_MAX_ID_LENGTH = 64;
 
 use Data::Dumper;
 use SQL::Translator::Schema::Constants;
-use SQL::Translator::Utils qw(debug header_comment truncate_id_uniquely parse_mysql_version);
+use SQL::Translator::Utils qw(debug header_comment 
+    truncate_id_uniquely parse_mysql_version);
 
 #
 # Use only lowercase for the keys (e.g. "long" and not "LONG")
@@ -144,6 +145,13 @@ my %translate  = (
     #
     bytea => 'BLOB',
 );
+
+#
+# Column types that do not support lenth attribute
+#
+my @no_length_attr = qw/
+  date time timestamp datetime year
+  /;
 
 
 sub preprocess_schema {
@@ -298,7 +306,7 @@ sub produce {
                                          });
     }
 
-    if (!$mysql_version || $mysql_version >= 5.000001) {
+    if ($mysql_version >= 5.000001) {
       for my $view ( $schema->get_views ) {
         push @table_defs, create_view($view,
                                        { add_replace_view  => $add_drop_table,
@@ -312,18 +320,20 @@ sub produce {
       }
     }
 
-    if (!$mysql_version || $mysql_version >= 5.000002) {
-        for my $trigger ( $schema->get_triggers ) {
-            push @table_defs, create_trigger($trigger, {
-                add_drop_trigger  => $add_drop_table,
-                no_comments       => $no_comments,
-                quote_table_names => $qt,
-                quote_field_names => $qf,
-            });
-        }
-    } else {
-        warn "triggers not supported in mysql version '$mysql_version'";
+    if ($mysql_version >= 5.000002) {
+      for my $trigger ( $schema->get_triggers ) {
+        push @table_defs, create_trigger($trigger,
+                                         { add_drop_trigger  => $add_drop_table,
+                                           show_warnings        => $show_warnings,
+                                           no_comments          => $no_comments,
+                                           quote_table_names    => $qt,
+                                           quote_field_names    => $qf,
+                                           max_id_length        => $max_id_length,
+                                           mysql_version        => $mysql_version
+                                           });
+      }
     }
+
 
 #    print "@table_defs\n";
     push @table_defs, "SET foreign_key_checks=1";
@@ -339,31 +349,32 @@ sub create_trigger {
     my $trigger_name = $trigger->name;
     debug("PKG: Looking at trigger '${trigger_name}'\n");
 
-    my @create;
-    for my $event (@{$trigger->database_events}) {
-        push @create, "DROP TRIGGER IF EXISTS $trigger_name" if $options->{add_drop_trigger};
-        my $create = "";
-        $create .= "CREATE";
-        $create .= " DEFINER = " . $trigger->{mysql_definer} if $trigger->{mysql_definer};
-        $create .= " TRIGGER ${qt}${trigger_name}".(@{$trigger->database_events} > 1 ? "_$event" : "")."${qt}";
-        $create .= " " . ( $trigger->perform_action_when eq 'after'  ? 'AFTER'
-                          :$trigger->perform_action_when eq 'before' ? 'BEFORE'
-                          :die "trigger ->{perform_action_when} must be 'before' or 'after'");
-        $create .= " " . ( $event eq 'insert' ? 'INSERT'
-                          :$event eq 'update' ? 'UPDATE'
-                          :$event eq 'delete' ? 'DELETE'
-                          :die "trigger ->{database_events} must be 'insert', 'update' or 'delete'");
-        $create .= " ON ${qt}".$trigger->on_table."${qt} FOR EACH ROW ";
-        $create .= $trigger->action;
-        push @create, $create;
+    my @statements;
+
+    my $events = $trigger->database_events;
+    for my $event ( @$events ) {
+        my $name = $trigger_name;
+        if (@$events > 1) {
+            $name .= "_$event";
+
+            warn "Multiple database events supplied for trigger '${trigger_name}', ",
+                "creating trigger '${name}'  for the '${event}' event\n"
+                    if $options->{show_warnings};
+        }
+
+        my $action = $trigger->action;
+        $action .= ";" unless $action =~ /;\s*\z/;
+
+        push @statements, "DROP TRIGGER IF EXISTS ${qt}${name}${qt}" if $options->{add_drop_trigger};
+        push @statements, sprintf(
+            "CREATE TRIGGER ${qt}%s${qt} %s %s ON ${qt}%s${qt}\n  FOR EACH ROW BEGIN %s END",
+            $name, $trigger->perform_action_when, $event, $trigger->on_table, $action,
+        );
+
     }
-    my $create = '';
-    $create .= "--\n-- Trigger: ${qt}${trigger_name}${qt}\n--\n" unless $options->{no_comments};
-    if ($trigger->action =~ /^\s*BEGIN/) {
-        $create .= "DELIMITER |\n" . join('',map {"$_|\n"} @create) . "DELIMITER "; # semicolon will be added in &produce
-    } else {
-        $create .= join(";\n", @create);
-    }
+    # Tack the comment onto the first statement
+    $statements[0] = "--\n-- Trigger ${qt}${trigger_name}${qt}\n--\n" . $statements[0] unless $options->{no_comments};
+    return @statements;
 }
 
 sub create_view {
@@ -403,7 +414,9 @@ sub create_view {
       $create .= " ( ${list} )";
     }
     if( my $sql = $view->sql ){
-      $create .= " AS (\n    ${sql}\n  )";
+      # do not wrap parenthesis around the selector, mysql doesn't like this
+      # http://bugs.mysql.com/bug.php?id=9198
+      $create .= " AS\n    ${sql}\n";
     }
 #    $create .= "";
     return $create;
@@ -416,7 +429,7 @@ sub create_table
     my $qt = $options->{quote_table_names} || '';
     my $qf = $options->{quote_field_names} || '';
 
-    my $table_name = $table->name;
+    my $table_name = quote_table_name($table->name, $qt);
     debug("PKG: Looking at table '$table_name'\n");
 
     #
@@ -424,9 +437,9 @@ sub create_table
     #
     my $create = '';
     my $drop;
-    $create .= "--\n-- Table: $qt$table_name$qt\n--\n" unless $options->{no_comments};
-    $drop = qq[DROP TABLE IF EXISTS $qt$table_name$qt] if $options->{add_drop_table};
-    $create .= "CREATE TABLE $qt$table_name$qt (\n";
+    $create .= "--\n-- Table: $table_name\n--\n" unless $options->{no_comments};
+    $drop = qq[DROP TABLE IF EXISTS $table_name] if $options->{add_drop_table};
+    $create .= "CREATE TABLE $table_name (\n";
 
     #
     # Fields
@@ -473,6 +486,14 @@ sub create_table
 #    $create .= ";\n\n";
 
     return $drop ? ($drop,$create) : $create;
+}
+
+sub quote_table_name {
+  my ($table_name, $qt) = @_;
+
+  $table_name =~ s/\./$qt.$qt/g;
+
+  return "$qt$table_name$qt";
 }
 
 sub generate_table_options 
@@ -534,7 +555,7 @@ sub create_field
     my $charset = $extra{'mysql_charset'};
     my $collate = $extra{'mysql_collate'};
 
-    my $mysql_version = parse_mysql_version ($options->{mysql_version}, 'perl') || 0;
+    my $mysql_version = $options->{mysql_version} || 0;
     #
     # Oracle "number" type -- figure best MySQL type
     #
@@ -586,7 +607,11 @@ sub create_field
     if ( lc($data_type) eq 'enum' || lc($data_type) eq 'set') {
         $field_def .= '(' . $commalist . ')';
     }
-    elsif ( defined $size[0] && $size[0] > 0 ) {
+    elsif ( 
+        defined $size[0] && $size[0] > 0 
+        && 
+        ! grep lc($data_type) eq $_, @no_length_attr  
+    ) {
         $field_def .= '(' . join( ', ', @size ) . ')';
     }
 
@@ -607,17 +632,14 @@ sub create_field
     # Null?
     $field_def .= ' NOT NULL' unless $field->is_nullable;
 
-    # Default?  XXX Need better quoting!
-    my $default = $field->default_value;
-    if ( defined $default ) {
-        SQL::Translator::Producer->_apply_default_value(
-          \$field_def,
-          $default, 
-          [
-            'NULL'       => \'NULL',
-          ],
-        );
-    }
+    # Default?
+    SQL::Translator::Producer->_apply_default_value(
+      $field,
+      \$field_def,
+      [
+        'NULL'       => \'NULL',
+      ],
+    );
 
     if ( my $comments = $field->comments ) {
         $field_def .= qq[ comment '$comments'];
@@ -646,16 +668,22 @@ sub alter_create_index
 
 sub create_index
 {
-    my ($index, $options) = @_;
+    my ( $index, $options ) = @_;
 
     my $qf = $options->{quote_field_names} || '';
 
-    return join( ' ', 
-                 lc $index->type eq 'normal' ? 'INDEX' : $index->type . ' INDEX',
-                 truncate_id_uniquely( $index->name, $options->{max_id_length} || $DEFAULT_MAX_ID_LENGTH ),
-                 '(' . join (", ", map { s/(.*?)((?:\(\d+\))?)$/$qf$1$qf$2/; $_ } $index->fields) . ')'
-                 );
-
+    return join(
+        ' ',
+        map { $_ || () }
+        lc $index->type eq 'normal' ? 'INDEX' : $index->type . ' INDEX',
+        $index->name
+        ? $qf . truncate_id_uniquely(
+                $index->name,
+                $options->{max_id_length} || $DEFAULT_MAX_ID_LENGTH
+          ) . $qf
+        : '',
+        '(' . $qf . join( "$qf, $qf", $index->fields ) . $qf . ')'
+    );
 }
 
 sub alter_drop_index
@@ -965,6 +993,6 @@ SQL::Translator, http://www.mysql.com/.
 =head1 AUTHORS
 
 darren chamberlain E<lt>darren@cpan.orgE<gt>,
-Ken Y. Clark E<lt>kclark@cpan.orgE<gt>.
+Ken Youens-Clark E<lt>kclark@cpan.orgE<gt>.
 
 =cut
